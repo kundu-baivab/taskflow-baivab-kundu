@@ -1,0 +1,4 @@
+*.exe
+*.dll
+__debug_bin
+.git
