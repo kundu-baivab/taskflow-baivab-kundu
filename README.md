@@ -1,372 +1,282 @@
-# TaskFlow — Engineering Take-Home Assignment
+# TaskFlow
 
-> **Mid-level Engineer · Full Stack / Frontend / Backend**
-> Estimated time: 3–5 hours · Deadline: 72 hours from receipt
+A full-stack Kanban task management application with JWT auth, PostgreSQL, role-aware permissions, project pagination, and drag-and-drop task workflow.
 
----
+## Features
 
-## Overview
+- Secure authentication with register/login/logout and JWT token revocation (DB blocklist).
+- Project management with ownership controls (owner-only update/delete).
+- Task management with granular permissions:
+  - Any authenticated user can create tasks in any project.
+  - Task update allowed for project owner, task creator, or assignee.
+  - Task delete allowed for project owner or task creator.
+- Kanban board with drag-and-drop status transitions (`todo`, `in_progress`, `done`).
+- Non-draggable task UX for unauthorized users (lock icon + blocked drag handle).
+- Assignee support end-to-end (assign task to any user, filter by assignee).
+- Project list pagination with user page-size preference (`5`, `10`, `15`) persisted in local storage.
+- Themed UI (light/dark), themed scrollbars, and column-level scrolling for Kanban.
+- React Query hooks-based API layer with optimistic updates for task moves.
 
-You're building **TaskFlow** — a minimal but real task management system. Users can register, log in, create projects, add tasks to those projects, and assign tasks to themselves or others.
+## Tech Stack
 
-This is not a to-do app demo. It's a small product with authentication, relational data, a REST API, and a polished UI. Scope is intentionally constrained so you can ship something **complete**.
-
-> **On AI tools:** Cursor, Copilot, and ChatGPT are permitted. We evaluate the quality of your decisions, not the volume of your code. A project with thoughtful architecture and honest tradeoffs outranks boilerplate AI output every time. Be prepared to discuss every part of your submission on a follow-up call.
-
----
-
-## Who Builds What
-
-| Role | Backend (Go) | Frontend (React) | Docker + README |
-|---|---|---|---|
-| Full Stack Engineer | ✅ Required | ✅ Required | ✅ Required |
-| Backend Engineer | ✅ Required | ❌ Not required — include a Postman/Bruno collection or test suite instead | ✅ Required |
-| Frontend Engineer | ❌ Not required — build against the mock API spec in [Appendix A](#appendix-a-mock-api-spec-for-frontend-only-candidates) | ✅ Required | ✅ Required |
-
----
-
-## The Data Model
-
-Design your schema around these entities. You may add fields, but do not remove any required ones.
-
-```
-User
-  id          uuid, primary key
-  name        string, required
-  email       string, unique, required
-  password    string, hashed (bcrypt), required
-  created_at  timestamp
-
-Project
-  id          uuid, primary key
-  name        string, required
-  description string, optional
-  owner_id    uuid → User
-  created_at  timestamp
-
-Task
-  id          uuid, primary key
-  title       string, required
-  description string, optional
-  status      enum: todo | in_progress | done
-  priority    enum: low | medium | high
-  project_id  uuid → Project
-  assignee_id uuid → User, nullable
-  due_date    date, optional
-  created_at  timestamp
-  updated_at  timestamp
-```
-
-Use **PostgreSQL**. Schema must be managed via migrations — not auto-migrate or ORM magic.
-
----
-
-## Backend Requirements
-
-> Required for: Full Stack and Backend roles
-> Language: **Go (preferred)**. If you're not comfortable with Go, use a language you know well — note your choice in the README.
-
-### Authentication
-
-| Method | Endpoint | Description |
-|---|---|---|
-| POST | `/auth/register` | Register with name, email, password |
-| POST | `/auth/login` | Returns a JWT access token |
-
-- Passwords must be hashed with **bcrypt** (cost ≥ 12)
-- JWT expiry: **24 hours**. Include `user_id` and `email` in claims.
-- All non-auth endpoints require `Authorization: Bearer <token>`
-
-### Projects API
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/projects` | List projects the current user owns or has tasks in |
-| POST | `/projects` | Create a project (owner = current user) |
-| GET | `/projects/:id` | Get project details + its tasks |
-| PATCH | `/projects/:id` | Update name/description (owner only) |
-| DELETE | `/projects/:id` | Delete project and all its tasks (owner only) |
-
-### Tasks API
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/projects/:id/tasks` | List tasks — support `?status=` and `?assignee=` filters |
-| POST | `/projects/:id/tasks` | Create a task |
-| PATCH | `/tasks/:id` | Update title, description, status, priority, assignee, due_date |
-| DELETE | `/tasks/:id` | Delete task (project owner or task creator only) |
-
-### General API Requirements
-
-- All responses: `Content-Type: application/json`
-- Validation errors → `400` with structured body:
-  ```json
-  { "error": "validation failed", "fields": { "email": "is required" } }
-  ```
-- Unauthenticated → `401`. Unauthorized action → `403`. Do **not** conflate these.
-- Not found → `404` with `{ "error": "not found" }`
-- Use structured logging (`slog`, `zap`, or `logrus`)
-- Graceful shutdown on `SIGTERM`
-
-### Backend Bonus (optional)
-
-- Pagination on list endpoints (`?page=&limit=`)
-- `GET /projects/:id/stats` — task counts by status and by assignee
-- At least 3 integration tests for auth or task endpoints
-
----
-
-## Frontend Requirements
-
-> Required for: Full Stack and Frontend roles
-> Framework: **React** (with TypeScript strongly preferred)
-
-### Pages & Views
-
-| View | Requirements |
+| Layer | Technology |
 |---|---|
-| Login / Register | Form with client-side validation, error handling, JWT storage |
-| Projects list | Show all accessible projects, button to create new project |
-| Project detail | Tasks listed or grouped, filter by status and assignee |
-| Task create/edit | Modal or side panel — title, status, priority, assignee, due date |
-| Navbar | Show logged-in user's name, logout button |
+| Backend | Go 1.22, Chi router, pgx, golang-jwt, bcrypt, slog |
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, TanStack Query, dnd-kit |
+| Database | PostgreSQL 16 |
+| Infra | Docker Compose, multi-stage Dockerfiles, golang-migrate |
 
-### UX & State
+## Architecture
 
-- Use **React Router** for navigation
-- Auth state must persist across page refreshes (localStorage or equivalent)
-- Protected routes: redirect to `/login` if unauthenticated
-- **Loading and error states must be visible** — no silent failures, no blank screens
-- Optimistic UI for task status changes (update immediately, revert on error)
+- Backend follows `Handler -> Service -> Repository`.
+  - Handlers: request parsing, validation, HTTP response mapping.
+  - Services: business logic and authorization rules.
+  - Repositories: SQL access via pgx (no ORM).
+- Frontend uses model-scoped API clients and query/mutation hooks:
+  - `frontend/src/api/*` for HTTP functions.
+  - `frontend/src/hooks/*` for React Query orchestration.
 
-### Design & Polish
+## Database Schema
 
-- Use a component library (shadcn/ui, Radix, Chakra, MUI) **or** build your own — state your choice in the README
-- Responsive: must work at **375px** (mobile) and **1280px** (desktop) widths
-- No broken layouts, no console errors in the production build
-- Sensible empty states — no `undefined`, no blank white boxes
+### Basic Data Model
+```
+- users
+  - id (UUID, PK)
+  - name (TEXT)
+  - email (TEXT, UNIQUE)
+  - password (TEXT, bcrypt hash)
+  - created_at (TIMESTAMPTZ)
 
-### Frontend Bonus (optional)
+- projects
+  - id (UUID, PK)
+  - name (TEXT)
+  - description (TEXT)
+  - owner_id (UUID, FK -> users.id)
+  - created_at (TIMESTAMPTZ)
 
-- Drag-and-drop to reorder tasks or change their status column
-- Dark mode toggle that persists across sessions
-- Real-time task updates via WebSocket or SSE (requires backend support)
+- tasks
+  - id (UUID, PK)
+  - title (TEXT)
+  - description (TEXT)
+  - status (task_status)
+  - priority (task_priority)
+  - project_id (UUID, FK -> projects.id)
+  - creator_id (UUID, FK -> users.id, nullable)
+  - assignee_id (UUID, FK -> users.id, nullable)
+  - due_date (DATE, nullable)
+  - created_at (TIMESTAMPTZ)
+  - updated_at (TIMESTAMPTZ)
 
----
+- revoked_tokens
+  - jti (TEXT, PK)
+  - expires_at (TIMESTAMPTZ)
+```
 
-## Infrastructure Requirements
+### Relationships
 
-> Required for all roles
+- One user can own many projects.
+- One project can have many tasks.
+- One user can create many tasks.
+- One user can be assigned many tasks.
+- `revoked_tokens` stores invalidated JWT IDs until expiration.
 
-### Docker
+Enums:
+- `task_status`: `todo`, `in_progress`, `done`
+- `task_priority`: `low`, `medium`, `high`
 
-- `docker-compose.yml` at the repo root must spin up the **full stack**: PostgreSQL, API server, and (for Full Stack) the React app
-- A single `docker compose up` must work with **zero manual steps**
-- PostgreSQL credentials must be configurable via `.env`
-- Include a `.env.example` with **all** required variables and sensible defaults
-- The API `Dockerfile` must use a **multi-stage build** (build stage + minimal runtime stage)
+## Getting Started (Docker)
 
-### Migrations
+### Prerequisites
 
-- Use a migration tool: `golang-migrate`, `goose`, `dbmate`, or equivalent
-- Migrations must run **automatically on container start**, OR instructions must be explicit and exact in the README
-- Both **up and down** migrations are required for every migration file
-- Include a **seed script or SQL file** that creates at least:
-  - 1 user (with a known password for testing)
-  - 1 project
-  - 3 tasks with different statuses
+- Docker
+- Docker Compose
 
----
-
-## README Requirements
-
-Your README is evaluated as part of the rubric. It must include all of the following sections:
-
-### 1. Overview
-What this is, what it does, and what tech stack you used.
-
-### 2. Architecture Decisions
-Why did you structure things the way you did? What tradeoffs did you make? What did you intentionally leave out and why?
-
-### 3. Running Locally
-Exact commands from `git clone` to the app running in a browser. Assume the reviewer has Docker and nothing else installed.
+### 1) Configure environment
 
 ```bash
-# Example — your actual commands go here
-git clone https://github.com/your-name/taskflow
-cd taskflow
 cp .env.example .env
-docker compose up
-# App available at http://localhost:3000
 ```
 
-### 4. Running Migrations
-If migrations don't run automatically on startup, provide the exact commands.
+### 2) Start the stack
 
-### 5. Test Credentials
-Seed user credentials so we can log in immediately without registering:
+```bash
+docker compose up --build
 ```
-Email:    test@example.com
+
+Services:
+- Frontend: `http://localhost:3000`
+- API: `http://localhost:8080`
+- PostgreSQL (host): `127.0.0.1:5433`
+
+### 3) Stop the stack
+
+```bash
+docker compose down
+```
+
+To wipe DB volume too:
+
+```bash
+docker compose down -v
+```
+
+## Environment Variables
+
+Defined in `.env.example`:
+
+| Variable | Required | Description |
+|---|---|---|
+| `POSTGRES_USER` | Yes | PostgreSQL username for container bootstrap |
+| `POSTGRES_PASSWORD` | Yes | PostgreSQL password for container bootstrap |
+| `POSTGRES_DB` | Yes | Initial database name |
+| `DATABASE_URL` | Yes | Backend DB connection string (inside Docker network uses host `db`) |
+| `JWT_SECRET` | Yes | HMAC secret for signing JWT tokens |
+| `API_PORT` | No | Backend HTTP port (defaults to `8080`) |
+| `TEST_DATABASE_URL` | For tests | Host-side DB URL for integration tests (`127.0.0.1:5433`) |
+
+## Migrations and Seed Data
+
+- Migrations run automatically at API container startup via `backend/entrypoint.sh`.
+- Current migrations include:
+  - `000001_init` (core schema)
+  - `000002_revoked_tokens` (JWT revocation blocklist table)
+- Seed data is applied by backend code (`backend/internal/seed/seed.go`) after DB connection.
+
+### Default Test Credentials
+
+```
+Email: test@example.com
 Password: password123
 ```
 
-### 6. API Reference
-List all endpoints with request/response examples, or link to a Postman/Bruno collection in the repo.
+## API Reference
 
-### 7. What You'd Do With More Time
-Honest reflection. What shortcuts did you take? What would you improve or add? This section matters — it tells us how you think about quality and tradeoffs.
+All endpoints return JSON.  
+Protected endpoints require `Authorization: Bearer <token>`.
 
----
+### Auth
 
-## Evaluation Rubric
-
-Minimum passing scores: **28 / 45** for Full Stack · **16 / 25** for Frontend-only or Backend-only
-
-| Area | What we look for | Points | Roles |
+| Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| **Correctness** | Does it run? Does auth work end-to-end? Can we complete the core flows? | 5 | All |
-| **Code quality** | Naming, structure, separation of concerns, reviewable code, no god functions | 5 | All |
-| **API design** | RESTful conventions, correct HTTP status codes, clean error responses, auth handled properly | 5 | FS, BE |
-| **Data modeling** | Schema makes sense, migrations are clean, indexes where appropriate | 5 | FS, BE |
-| **UI/UX** | Usable, consistent, handles loading/error/empty states, responsive | 5 | FS, FE |
-| **Component design** | Sensible breakdown, state managed at the right level, no prop-drilling nightmares | 5 | FS, FE |
-| **Docker & DevEx** | Does `docker compose up` just work? Multi-stage Dockerfile? `.env.example` present? | 5 | All |
-| **README quality** | Clear setup, architecture reasoning, honest "what's missing" section | 5 | All |
-| **Bonus** | Tests, pagination, drag-and-drop, real-time, dark mode, stats endpoint | +5 | All |
+| `POST` | `/api/auth/register` | No | Register user with `{ name, email, password }`, returns `{ token, user }` |
+| `POST` | `/api/auth/login` | No | Login with `{ email, password }`, returns `{ token, user }` |
+| `POST` | `/api/auth/logout` | Yes | Revokes current JWT (`204 No Content`) |
 
-### Automatic Disqualifiers
+### Users
 
-The following will result in immediate rejection, regardless of other quality:
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/users` | Yes | List all users (for assignment and owner display) |
 
-- App does not run with `docker compose up`
-- No database migrations (manual SQL dumps do not count)
-- Passwords stored in plaintext
-- JWT secret hardcoded in source code (not in `.env`)
-- No README
-- Submission after the 72-hour deadline without prior notice
+### Projects
 
----
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/projects?page=<n>&limit=<n>` | Yes | List all projects with pagination (`page` default `1`, `limit` default `10`) |
+| `POST` | `/api/projects` | Yes | Create project with `{ name, description }` |
+| `GET` | `/api/projects/:id` | Yes | Get project details and tasks |
+| `PATCH` | `/api/projects/:id` | Yes | Update project (owner only) |
+| `DELETE` | `/api/projects/:id` | Yes | Delete project and its tasks (owner only) |
 
-## Submission Instructions
+### Tasks
 
-1. **Create a public GitHub repository** — name it `taskflow-[your-name]`
-2. **Repo structure** — monorepo with `/backend` and `/frontend` directories, or two separate repos linked from the README. `docker-compose.yml` at root.
-3. **No secrets in git** — commit `.env.example`, never `.env`. If you accidentally commit secrets, rotate them before submitting.
-4. **Send us the link** — reply to the assignment email with your GitHub URL before the deadline.
-5. **Expect a code review call** — we'll schedule a 30-minute session to walk through your decisions. You should be able to explain any part of your code.
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/projects/:id/tasks?status=<status>&assignee=<userId>` | Yes | List project tasks, optional filters |
+| `POST` | `/api/projects/:id/tasks` | Yes | Create task in project; creator is the authenticated user |
+| `PATCH` | `/api/tasks/:id` | Yes | Update task fields (`title`, `description`, `status`, `priority`, `assignee_id`, `due_date`) |
+| `DELETE` | `/api/tasks/:id` | Yes | Delete task |
+| `GET` | `/api/projects/:id/stats` | Yes | Aggregated counts by status and assignee |
 
----
+## Authorization Model
 
-## Appendix A: Mock API Spec (Frontend-only candidates)
+### Project Rules
 
-If you are applying for a **Frontend-only** role, build your UI against this mock API. You may use `json-server`, `msw` (Mock Service Worker), or any other mocking approach — just document it in your README.
+- View project/list projects: any authenticated user.
+- Create project: any authenticated user (creator becomes owner).
+- Update/Delete project: owner only.
 
-### Base URL
-```
-http://localhost:4000
-```
+### Task Rules
 
-### Auth endpoints
+- View tasks: any authenticated user (project must exist).
+- Create task: any authenticated user in any project.
+- Update task (including drag status change): project owner OR task creator OR assignee.
+- Delete task: project owner OR task creator.
 
-**POST `/auth/register`**
-```json
-// Request
-{ "name": "Jane Doe", "email": "jane@example.com", "password": "secret123" }
+## JWT Revocation
 
-// Response 201
-{ "token": "<jwt>", "user": { "id": "uuid", "name": "Jane Doe", "email": "jane@example.com" } }
-```
+- JWT includes a unique `jti` claim.
+- On logout, backend stores `{ jti, expires_at }` in `revoked_tokens`.
+- Auth middleware rejects requests with revoked `jti`.
+- A background purge job periodically deletes expired revoked-token rows.
 
-**POST `/auth/login`**
-```json
-// Request
-{ "email": "jane@example.com", "password": "secret123" }
+## Running Tests Locally
 
-// Response 200
-{ "token": "<jwt>", "user": { "id": "uuid", "name": "Jane Doe", "email": "jane@example.com" } }
-```
+### Backend integration tests (recommended flow)
 
-### Projects endpoints
+1. Start Docker services (at least DB, usually full stack is easiest):
 
-**GET `/projects`** — requires `Authorization: Bearer <token>`
-```json
-// Response 200
-{
-  "projects": [
-    { "id": "uuid", "name": "Website Redesign", "description": "Q2 project", "owner_id": "uuid", "created_at": "2026-04-01T10:00:00Z" }
-  ]
-}
+```bash
+docker compose up -d
 ```
 
-**POST `/projects`**
-```json
-// Request
-{ "name": "New Project", "description": "Optional description" }
+2. Run backend integration tests from `backend`:
 
-// Response 201
-{ "id": "uuid", "name": "New Project", "description": "Optional description", "owner_id": "uuid", "created_at": "2026-04-09T10:00:00Z" }
+```bash
+cd backend
+export TEST_DATABASE_URL="postgres://taskflow:taskflow@127.0.0.1:5433/taskflow?sslmode=disable"
+go test -v ./internal/handler
 ```
 
-**GET `/projects/:id`**
-```json
-// Response 200
-{
-  "id": "uuid", "name": "Website Redesign", "description": "Q2 project", "owner_id": "uuid",
-  "tasks": [
-    { "id": "uuid", "title": "Design homepage", "status": "in_progress", "priority": "high", "assignee_id": "uuid", "due_date": "2026-04-15", "created_at": "...", "updated_at": "..." }
-  ]
-}
+On PowerShell (Windows):
+
+```powershell
+cd backend
+$env:TEST_DATABASE_URL="postgres://taskflow:taskflow@127.0.0.1:5433/taskflow?sslmode=disable"
+go test -v ./internal/handler
 ```
 
-**PATCH `/projects/:id`**
-```json
-// Request
-{ "name": "Updated Name", "description": "Updated description" }
-// Response 200 — returns updated project object
+## Project Structure
+
+```text
+.
+├─ backend/
+│  ├─ cmd/server/                 # backend entrypoint package
+│  ├─ internal/
+│  │  ├─ config/                  # env loading
+│  │  ├─ handler/                 # HTTP handlers + integration tests
+│  │  ├─ middleware/              # auth + logging middleware
+│  │  ├─ model/                   # domain structs
+│  │  ├─ repository/              # SQL data access
+│  │  ├─ service/                 # business logic and permissions
+│  │  └─ seed/                    # runtime seed data
+│  ├─ migrations/                 # SQL migrations
+│  ├─ entrypoint.sh               # container startup script (run migrations, then start server)
+│  └─ Dockerfile                  # builds Go API image for Docker Compose
+├─ frontend/
+│  ├─ index.html                  # Vite HTML entry document
+│  ├─ src/
+│  │  ├─ main.tsx                 # frontend app entrypoint (mounts React app)
+│  │  ├─ App.tsx                  # root app routing/layout shell
+│  │  ├─ api/                     # HTTP API calls
+│  │  ├─ hooks/                   # React Query hooks
+│  │  ├─ components/              # UI components
+│  │  ├─ context/                 # auth/theme context
+│  │  ├─ pages/                   # route pages
+│  │  └─ types/                   # shared TS types
+│  ├─ nginx.conf                  # Nginx runtime config for serving built frontend
+│  └─ Dockerfile                  # multi-stage frontend build + Nginx serve image
+├─ docker-compose.yml
+├─ .env.example
+└─ README.md
 ```
 
-**DELETE `/projects/:id`** → Response `204 No Content`
+### Key Entry and Infra Files
 
-### Tasks endpoints
-
-**GET `/projects/:id/tasks?status=todo&assignee=uuid`**
-```json
-// Response 200
-{ "tasks": [ /* task objects */ ] }
-```
-
-**POST `/projects/:id/tasks`**
-```json
-// Request
-{ "title": "Design homepage", "description": "...", "priority": "high", "assignee_id": "uuid", "due_date": "2026-04-15" }
-// Response 201 — returns created task object
-```
-
-**PATCH `/tasks/:id`**
-```json
-// Request — all fields optional
-{ "title": "Updated title", "status": "done", "priority": "low", "assignee_id": "uuid", "due_date": "2026-04-20" }
-// Response 200 — returns updated task object
-```
-
-**DELETE `/tasks/:id`** → Response `204 No Content`
-
-### Error responses
-
-```json
-// 400 Validation error
-{ "error": "validation failed", "fields": { "email": "is required" } }
-
-// 401 Unauthenticated
-{ "error": "unauthorized" }
-
-// 403 Forbidden
-{ "error": "forbidden" }
-
-// 404 Not found
-{ "error": "not found" }
-```
-
----
-
-*Questions? Reply to the email this was sent from. Good luck — we look forward to seeing what you build.*
+- `backend/cmd/server/main.go`: backend runtime entrypoint; wires repositories/services/handlers, routes, middleware, and background purge job.
+- `backend/entrypoint.sh`: container entry script; runs DB migrations before starting the API binary.
+- `backend/Dockerfile`: builds the backend image used by `docker-compose`.
+- `frontend/src/main.tsx`: frontend runtime entrypoint; bootstraps React and providers.
+- `frontend/Dockerfile`: builds static frontend assets and serves them through Nginx in the final container.
+- `frontend/nginx.conf`: controls frontend container web serving behavior.
+- `docker-compose.yml`: orchestrates `db`, `api`, and `frontend` services with networking, env vars, health checks, and ports.
