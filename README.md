@@ -101,7 +101,7 @@ cp .env.example .env
 ### 2) Start the stack
 
 ```bash
-docker compose up --build
+docker compose up
 ```
 
 Services:
